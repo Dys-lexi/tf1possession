@@ -1,0 +1,6 @@
+"AddonInfo"
+{
+        addontitle "lexi-possesion"
+        addonversion "1.0"
+        addonDescription "gives you the loadout of the player you killed"
+}
