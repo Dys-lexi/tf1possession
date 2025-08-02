@@ -41,19 +41,19 @@ function Lejecting( player )
     //     return true
 
     // thread TitanEjectPlayer( player )
-	printt("TITAN EJECTING TITAN EJECTING TITAN EJECTING TITAN EJECTING")
+	// printt("TITAN EJECTING TITAN EJECTING TITAN EJECTING TITAN EJECTING")
 	thread onplayermurdered(player,false,true)
     // return true
 }
 function OnDamaged(ent,damageInfo) {
-	print("HERE")
+	// print("HERE")
 
     local inflictor = damageInfo.GetInflictor()
     if(inflictor == null)
         return
 
     if(inflictor.IsPlayer() &&  ent.GetEntIndex() != inflictor.GetEntIndex()) {
-		print("PASSED HERE")
+		// print("PASSED HERE")
 		 local pindex = ent.GetEntIndex()
 		loadouts[pindex].lasthit <- Time()
 		loadouts[pindex].lasthitby <- inflictor.GetEntIndex()
@@ -113,7 +113,7 @@ function Designator( name )
 	return false
 }
 function onplayermurdered(player,damage = false, attacker = false){
-   printt("OWO I GOT HERE" + player.GetPlayerName())
+//    printt("OWO I GOT HERE" + player.GetPlayerName())
 //    PrintTable(loadouts)
    if (attacker == false &&  player.GetEntIndex() != damage.GetAttacker().GetEntIndex()){
    attacker = damage.GetAttacker()
@@ -126,15 +126,15 @@ function onplayermurdered(player,damage = false, attacker = false){
 		return
 	}}
 	else if (loadouts[player.GetEntIndex()].lasthitby != player.GetEntIndex() && Time() - loadouts[player.GetEntIndex()].lasthit < 10 ){
-		printt("HEREEE")
+		// printt("HEREEE")
 	attacker =  GetEntByIndex(loadouts[player.GetEntIndex()].lasthitby)	
 	}
 	else{
 		local timeleft = (Time() - loadouts[player.GetEntIndex()].lasthit)
-		print("SOOOBBB" + timeleft)
+		// print("SOOOBBB" + timeleft)
 		return
 	}
-	printt("AND HEREEE")
+	// printt("AND HEREEE")
 //    local player.GetEntIndex() = 0
 //    for ( local i = 0; i < GetPlayerArray().len() ; i++) {
 //       if ( player.GetPlayerName() == GetPlayerArray()[i].GetPlayerName()){
@@ -142,14 +142,14 @@ function onplayermurdered(player,damage = false, attacker = false){
 //          break
 //       }
 //    }
-printt("ATTACKER" + attacker.GetPlayerName())
+// printt("ATTACKER" + attacker.GetPlayerName())
 
    if (loadouts[player.GetEntIndex()].isatitan !=attacker.IsTitan()) {
-		print("YOU'RE NOT A REAL TITAN" + attacker.IsTitan() + loadouts[player.GetEntIndex()].isatitan)
+		// print("YOU'RE NOT A REAL TITAN" + attacker.IsTitan() + loadouts[player.GetEntIndex()].isatitan)
       return
    }
  
-   printt("BOW WOW" + attacker.GetPlayerName())
+//    printt("BOW WOW" + attacker.GetPlayerName())
    thread moveteleport(attacker,attacker.GetOrigin(),attacker.GetAngles(),loadouts[player.GetEntIndex()].pos,loadouts[player.GetEntIndex()].angles)
 //    attacker.SetOrigin(loadouts[player.GetEntIndex()].pos)
 //    attacker.SetAngles(loadouts[player.GetEntIndex()].angles)
