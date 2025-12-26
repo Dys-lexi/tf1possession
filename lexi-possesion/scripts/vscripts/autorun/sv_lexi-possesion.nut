@@ -154,6 +154,7 @@ function onplayermurdered(player,damage = false, attacker = false){
 //    attacker.SetOrigin(loadouts[player.GetEntIndex()].pos)
 //    attacker.SetAngles(loadouts[player.GetEntIndex()].angles)
    RetrievePilotWeapons(attacker,loadouts[player.GetEntIndex()].weapons)
+   LSendChatMsg(attacker,0,"You killed "+player.GetPlayerName()+ " and inherited their loadout!",false,false)
    
 
    
