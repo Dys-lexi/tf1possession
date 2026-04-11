@@ -191,7 +191,7 @@ if ( createProp ) {
 			if ( parentedModel.GetBodyGroupState( 1 ) == 1 ) // Enable destroyed tier2 bodygroup
 				prop_physics.SetBodygroup( 1, 2 )
 		}
-	}
+	
 
 	// Hide pod model, and delete it. We have to hide it first because it doesn't get deleted right away for some reason
 	parentedModel.Hide()
