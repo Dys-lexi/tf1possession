@@ -6,7 +6,7 @@ const TITAN_NUCLEAR_CORE_FX_1P = "P_xo_exp_nuke_1P"
 const TITAN_NUCLEAR_CORE_NUKE_FX = "P_xo_nuke_warn_flare"
 
 RegisterSignal( "RocketPodStateUpdate" )
-
+RegisterSignal( "ChargeCannonStateUpdate" )
 
 enum eCockpitState
 {
@@ -66,6 +66,9 @@ function main()
 	Globalize( TransferShoulderTurret_threaded )
 	Globalize( LoadoutContainsRocketPodWeapon )
 
+	Globalize( CreateChargeCannon )
+	Globalize( LoadoutContainsChargeCannon )
+		
 	AddSoulInitFunc( Titan_ShoulderTurretInit )
 	AddSoulInitFunc( AddPanelToTitan )
 	AddSoulInitFunc( SetRodeoHitBoxNumberOnSoul )
@@ -77,7 +80,8 @@ function main()
 	AddSoulDeathFunc( Titan_RodeoPanelCleanup )
 	AddSoulDeathFunc( Titan_RocketPodsCleanup )
 	AddSoulDeathFunc( Titan_ShoulderTurretCleanup )
-
+	AddSoulDeathFunc( Titan_ChargeCannonCleanup )
+		
 	local table = {}
 	table.attachment <- "pod_l"
 	table.open <- "open"
@@ -89,6 +93,15 @@ function main()
 	table.backIdle <- "idle_back"
 	file.rocketPodAnims <- table
 
+	local table = {}
+	table.attachment <- "pod_r"
+	table.open <- "open"
+	table.openIdle <- "idle_open"
+	table.close <- "close"
+	table.closeIdle <- "idle_closed"
+	table.fire <- "fire"
+	file.chargeCannonAnims <- table
+		
 	file.titanVOEjectNotifyDist <- 2000 * 2000
 
 	if ( IsServer() )
@@ -109,6 +122,7 @@ function main()
 		PrecacheModel( ROCKET_POD_MODEL_STRYDER_LEFT )
 		PrecacheModel( "models/titans/destroyer/destroyer_titan_hatch_panel.mdl" )
 		PrecacheModel( "models/industrial/bolt_tiny01.mdl" )
+		PrecacheModel( SHOULDER_CHARGE_CANNON_MODEL )
 	}
 	else
 	{
@@ -132,16 +146,21 @@ function Titan_ShoulderTurretCleanup( soul )
 	Titan_CreatePhysicsModelsFromParentedModels( soul.shoulderTurret.model, soul )
 }
 
+function Titan_ChargeCannonCleanup( soul )
+{
+	Titan_CreatePhysicsModelsFromParentedModels( soul.chargeCannon.model, soul, true )
+}
+
 //Can't just do this by default for all children on the Titan since they need to have physics properties defined
-function Titan_CreatePhysicsModelsFromParentedModels( parentedModel, soul )
+function Titan_CreatePhysicsModelsFromParentedModels( parentedModel, soul, createProp = false )
 {
 	if ( !IsValid ( parentedModel ) )
 		return
 
 	// Make it not solid so ejection doesn't get caught up on it
 	parentedModel.NotSolid()
+if ( createProp ) {
 
-/*
 	// Stop any running animations
 	parentedModel.Anim_Stop()
 
@@ -162,7 +181,17 @@ function Titan_CreatePhysicsModelsFromParentedModels( parentedModel, soul )
 	//prop_physics.SetAngularVelocity( 0,0,0 )
 	//prop_physics.SetVelocity( Vector( 0,0,0) )
 	prop_physics.Kill( 11.0 )
-*/
+	}
+
+	if ( soul.chargeCannon.model && parentedModel == soul.chargeCannon.model )
+		{
+			prop_physics.SetBodygroup( 0, 1 ) // Enable destroyed charge cannon bodygroup
+
+
+			if ( parentedModel.GetBodyGroupState( 1 ) == 1 ) // Enable destroyed tier2 bodygroup
+				prop_physics.SetBodygroup( 1, 2 )
+		}
+	
 
 	// Hide pod model, and delete it. We have to hide it first because it doesn't get deleted right away for some reason
 	parentedModel.Hide()
@@ -622,6 +651,193 @@ function NPC_SetNuclearPayload( npc, doSet )
 }
 Globalize( NPC_SetNuclearPayload )
 
+function CreateChargeCannon( soul, titan = null, oldTitan = null )
+{
+	if ( !IsValid( soul ) || !IsValid( titan ) )
+		return
+
+	Assert( soul.chargeCannon.model == null )
+
+	local chargeCannon
+
+	local team = titan.GetTeam()
+	chargeCannon = CreatePropDynamic( SHOULDER_CHARGE_CANNON_MODEL, null, null, 8 )
+	chargeCannon.kv.PassDamageToParent = true
+	chargeCannon.kv.CollisionGroup = 21	// COLLISION_GROUP_BLOCK_WEAPONS
+	chargeCannon.SetTeam( team )
+	chargeCannon.MarkAsNonMovingAttachment()
+	soul.chargeCannon.model = chargeCannon	
+
+	// TODO: needs anims
+	thread ChargeCannonThink( soul, titan, chargeCannon )
+
+	chargeCannon.SetParent( titan, file.chargeCannonAnims.attachment, false )
+	SetSkinForTeam( chargeCannon, team )
+	SetVisibleEntitiesInConeQueriableEnabled( chargeCannon, true )
+}
+
+function ChargeCannonThink( soul, titan, chargeCannon )
+{
+	chargeCannon.EndSignal( "OnDestroy" )
+	Assert( IsServer() )
+	Assert( IsValid( soul ) )
+	Assert( IsSoul( soul ) )
+	soul.EndSignal( "OnDestroy" )
+
+	local oldState = -1
+	local state = eChargeCannonState.ready
+
+	for ( ;; )
+	{
+		wait 0
+
+		/**************************************/
+		/* SEE IF WE HAVE A CHARGE CANNON */
+		/**************************************/
+
+		local owner = soul.GetSoulOwner()
+		if ( !IsValid( owner ) )
+			continue
+		if ( !owner.IsPlayer() && !owner.IsNPC() )
+			continue
+
+		local weapon = GetChargeCannonWeapon( owner )
+		if ( weapon == null )
+			continue
+
+		if ( !IsValid( chargeCannon ) )
+			continue
+
+		if ( weapon.HasMod( "burn_mod_charge_cannon" ) )
+			chargeCannon.SetBodygroup( 1, 1 ) // Enable tier2 bodygroup
+
+		/********************************************/
+		/*  FIGURE OUT WHAT STATE PODS SHOULD BE IN */
+		/********************************************/
+		if ( weapon.GetWeaponPrimaryClipCount() < 1 )
+		{
+			// Cannon is unavailable or reloading.
+			state = eChargeCannonState.reloading
+		}
+		else
+		{
+			// Cannon can be fired.
+			state = eChargeCannonState.ready
+		}
+
+		/******************************************/
+		/*  UPDATE PODS TO MATCH THE WEAPON STATE */
+		/******************************************/
+
+		if ( state == oldState )
+			continue
+
+		//printt( "-----------------------------------" )
+		//printt( "TITAN CHARGE CANNON STATE CHANGED TO", oldState, "->", state )
+
+		soul.Signal( "ChargeCannonStateUpdate" )
+
+		// These animations dont play properly for some reason
+		/*
+		switch( state )
+		{
+			case eChargeCannonState.reloading:
+				thread ChargeCannonReload( soul, oldState )
+				break
+
+			case eChargeCannonState.ready:
+				thread ChargeCannonReady( soul, oldState )
+				break
+
+			default:
+				//Assert(0)
+				break
+		}
+		*/
+
+		oldState = state
+
+		//printt( "-----------------------------------" )
+	}
+}
+
+function ChargeCannonReload( soul, oldState )
+{
+	soul.EndSignal( "ChargeCannonStateUpdate" )
+	soul.EndSignal( "OnDestroy" )
+
+	local model_l = soul.chargeCannon.model
+	model_l.EndSignal( "OnDestroy" )
+
+	if ( oldState == -1 )
+	{
+		//printt( "jump right to reloading idle" )
+		/*model_l.Anim_Play( anims_l.backIdle )
+		model_r.Anim_Play( anims_r.backIdle )*/
+	}
+	else if ( oldState == eChargeCannonState.ready )
+	{
+		//printt( "close doors, fold pod down, then play down idle" )
+		PlayChargeCannonAnim( "fire", soul )
+		model_l.WaitSignal( "OnAnimationDone" )
+		WaitEndFrame() // wait for OnTitanDeath signal
+
+		PlayChargeCannonAnim( "close", soul )
+		model_l.WaitSignal( "OnAnimationDone" )
+		WaitEndFrame() // wait for OnTitanDeath signal
+
+		PlayChargeCannonAnim( "closeIdle", soul )
+
+		/*model_l.Anim_Play( anims_l.frontToBack )
+		model_r.Anim_Play( anims_r.frontToBack )
+		model_r.WaitSignal( "OnAnimationDone" )
+
+		model_l.Anim_Play( anims_l.backIdle )
+		model_r.Anim_Play( anims_r.backIdle )*/
+	}
+	else
+		Assert( 0 )
+}
+
+function ChargeCannonReady( soul, oldState )
+{
+	soul.EndSignal( "ChargeCannonStateUpdate" )
+	soul.EndSignal( "OnDestroy" )
+	soul.EndSignal( "OnTitanDeath" )
+
+	local model_l = soul.chargeCannon.model
+	model_l.EndSignal( "OnDestroy" )
+
+	if ( oldState == -1 )
+	{
+		PlayChargeCannonAnim( "openIdle", soul )
+		//printt( "jump right to ready idle" )
+	}
+	else if ( oldState == eChargeCannonState.reloading )
+	{
+		//printt( "fold pod up, then play open idle" )
+		/*model_l.Anim_Play( anims_l.backToFront )
+		model_r.Anim_Play( anims_r.backToFront )
+		model_r.WaitSignal( "OnAnimationDone" )*/
+		PlayChargeCannonAnim( "open", soul )
+		model_l.WaitSignal( "OnAnimationDone" )
+		WaitEndFrame() // wait for OnTitanDeath signal
+
+		PlayChargeCannonAnim( "openIdle", soul )
+	}
+	else
+		Assert( 0 )
+}
+
+function PlayChargeCannonAnim( animationString, soul )
+{
+	printt( "playing animation: " + animationString )
+
+	local anims = file.chargeCannonAnims
+	local model = soul.chargeCannon.model
+	model.Anim_Play( anims[animationString] )
+}
+Globalize( PlayChargeCannonAnim )
 
 /*
 open
@@ -1493,6 +1709,24 @@ function GetRocketPodWeapon( entity )
 	return null
 }
 
+function LoadoutContainsChargeCannon( player )
+{
+	Assert( IsValid( player ) )
+	local table = GetPlayerClassDataTable( player, "titan" )
+	foreach ( offhand in table.offhandWeapons )
+	{
+		local weapon = offhand.weapon
+		local weaponName = offhand.weapon
+
+		if ( type( weapon ) != "string" )
+			weaponName = weapon.GetClassname()
+
+		if ( weaponName == WEAPON_CHARGE_CANNON_NAME )
+			return true
+	}
+	return false
+}
+
 function DoesWeaponHaveRocketPods( weapon )
 {
 	if ( type( weapon ) != "string" )
@@ -1545,6 +1779,23 @@ function ShouldCreateRightPod( player )
 	}
 
 	return false
+}
+
+function GetChargeCannonWeapon( entity )
+{
+	Assert( IsValid( entity ) )
+	local offhandWeapons = entity.GetOffhandWeapons()
+	foreach( offhand in offhandWeapons )
+	{
+		local weaponName
+
+		if ( type( offhand ) != "string" )
+			weaponName = offhand.GetClassname()
+
+		if ( weaponName == WEAPON_CHARGE_CANNON_NAME )
+			return offhand
+	}
+	return null
 }
 
 if ( IsServer() )
